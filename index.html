@@ -1,0 +1,435 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ESP-FC Flasher</title>
+<style>
+  :root{
+    --bg:#f6f7f9; --card:#fff; --ink:#15181d; --muted:#5b6573; --line:#dde1e7;
+    --accent:#0b6bcb; --accent-ink:#fff; --ok:#17803d; --warn:#a15c00; --bad:#b42318;
+    --code:#0f1722; --code-ink:#d6e2f2;
+  }
+  @media (prefers-color-scheme:dark){
+    :root{--bg:#0e1116;--card:#171b22;--ink:#e8ebf0;--muted:#98a2b3;--line:#2a3039;
+      --accent:#4c9aff;--accent-ink:#06121f;--ok:#4cc27a;--warn:#e8a33d;--bad:#ff7b72;--code:#0a0d12;--code-ink:#cfe0f5}
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+  main{max-width:880px;margin:0 auto;padding:20px 16px 64px}
+  h1{font-size:22px;margin:8px 0 2px}
+  .sub{color:var(--muted);margin:0 0 20px}
+  section{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px;margin:14px 0}
+  h2{font-size:16px;margin:0 0 12px;display:flex;gap:10px;align-items:center}
+  h2 .n{background:var(--accent);color:var(--accent-ink);border-radius:50%;width:24px;height:24px;display:inline-grid;place-items:center;font-size:13px}
+  label{display:block;font-weight:600;font-size:13px;margin:12px 0 4px}
+  select,input[type=text]{width:100%;padding:9px 10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink);font:inherit}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:0 16px}
+  button{font:inherit;font-weight:600;padding:10px 16px;border-radius:8px;border:1px solid var(--accent);background:var(--accent);color:var(--accent-ink);cursor:pointer}
+  button.secondary{background:transparent;color:var(--accent)}
+  button:disabled{opacity:.45;cursor:not-allowed}
+  .note{border-left:3px solid var(--line);padding:6px 12px;margin:10px 0;color:var(--muted);font-size:14px}
+  .note.warn{border-color:var(--warn)} .note.bad{border-color:var(--bad)} .note.ok{border-color:var(--ok)}
+  .note b{color:var(--ink)}
+  code,pre{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:13px}
+  code.f{background:var(--bg);border:1px solid var(--line);border-radius:5px;padding:1px 6px}
+  pre{background:var(--code);color:var(--code-ink);border-radius:8px;padding:12px;overflow:auto;margin:8px 0;white-space:pre-wrap}
+  #drop{border:2px dashed var(--line);border-radius:10px;padding:18px;text-align:center;color:var(--muted);cursor:pointer}
+  #drop.over{border-color:var(--accent);color:var(--ink)}
+  progress{width:100%;height:14px;margin-top:10px}
+  .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:12px}
+  .pill{font-size:12px;padding:2px 8px;border-radius:99px;border:1px solid var(--line);color:var(--muted)}
+  table{border-collapse:collapse;width:100%;font-size:13px;margin:8px 0}
+  th,td{border:1px solid var(--line);padding:5px 8px;text-align:left}
+  th{background:var(--bg)}
+  td.n{font-variant-numeric:tabular-nums}
+  ol,ul{padding-left:20px;margin:8px 0} li{margin:4px 0}
+  a{color:var(--accent)}
+  #nosupport,#hosted,#chipwrap{display:none}
+  .credits{margin-top:22px;padding-top:14px;border-top:1px solid var(--line);color:var(--muted);font-size:13px}
+  .credits p{margin:6px 0}
+</style>
+</head>
+<body>
+<main>
+  <h1>ESP-FC Flasher</h1>
+  <p class="sub">Flash <a href="https://github.com/rtlopez/esp-fc" target="_blank" rel="noopener">esp-fc</a> flight-controller firmware to an ESP board, then configure it with <b>Betaflight Configurator 10.10</b>. Needs desktop Chrome or Edge (Web Serial).</p>
+
+  <div id="nosupport" class="note bad"><b>This browser has no Web Serial.</b> Open the page in desktop Chrome or Edge. Firefox and Safari can't flash.</div>
+
+  <section>
+    <h2><span class="n">1</span>Choose your board</h2>
+    <label for="board">Dev kit / board</label>
+    <select id="board"></select>
+    <div id="chipwrap">
+      <label for="chip">Chip on your board</label>
+      <select id="chip"></select>
+    </div>
+    <div id="boardinfo"></div>
+    <p class="note">esp-fc is built <b>per chip</b>, not per dev kit. Any board with a supported chip and at least 4 MB flash can run it. The board choice just selects the right chip and shows the matching caveats. Pin defaults are the firmware's, so wire to them or remap with the CLI.</p>
+  </section>
+
+  <section>
+    <h2><span class="n">2</span>Describe your hardware</h2>
+    <div class="grid">
+      <div><label for="gyro">Gyro / IMU bus</label>
+        <select id="gyro"><option value="spi">SPI (MPU9250/6500, ICM20602, ICM42688) — faster</option><option value="i2c">I2C (MPU6050, GY-521, GY-87, BMI160)</option></select></div>
+      <div><label for="rx">Receiver</label>
+        <select id="rx"><option>CRSF / ELRS</option><option>SBUS</option><option>IBUS</option><option>PPM</option><option>ESP-NOW (built-in)</option></select></div>
+      <div><label for="proto">ESC protocol</label>
+        <select id="proto">
+          <optgroup label="Standard / analog">
+            <option value="PWM">Standard PWM (1000–2000 µs)</option>
+            <option value="ONESHOT125">OneShot125</option>
+            <option value="ONESHOT42">OneShot42</option>
+            <option value="MULTISHOT">Multishot</option>
+            <option value="BRUSHED">Brushed motors (via FET drivers)</option>
+          </optgroup>
+          <optgroup label="Digital">
+            <option value="DSHOT300" selected>DShot300</option>
+            <option value="DSHOT150">DShot150</option>
+            <option value="DSHOT600">DShot600</option>
+            <option value="PROSHOT1000">ProShot1000</option>
+          </optgroup>
+        </select></div>
+      <div><label for="gps">GPS (u-blox)</label>
+        <select id="gps"><option value="0">None</option><option value="1">Yes</option></select></div>
+    </div>
+    <div id="protoinfo"></div>
+  </section>
+
+  <section>
+    <h2><span class="n">3</span>Flash</h2>
+    <div id="hosted" class="note ok"></div>
+    <p>Firmware file for this chip: <code class="f" id="fname"></code> from the <a id="rel" href="https://github.com/rtlopez/esp-fc/releases" target="_blank" rel="noopener">esp-fc Releases</a>.</p>
+    <div id="drop">Drop the firmware <code>.bin</code> here, or click to choose<input id="file" type="file" accept=".bin" hidden></div>
+    <div id="fileinfo" class="note" style="display:none"></div>
+    <div class="grid">
+      <div><label for="baud">Baud rate</label>
+        <select id="baud"><option>460800</option><option selected>921600</option><option>230400</option><option>115200</option></select></div>
+      <div><label for="erase">Erase flash first</label>
+        <select id="erase"><option value="0">No</option><option value="1">Yes, full chip erase</option></select></div>
+    </div>
+    <div class="row">
+      <button id="go" disabled>Connect &amp; flash</button>
+      <button id="stop" class="secondary" disabled>Disconnect</button>
+      <span id="detected" class="pill">no device</span>
+    </div>
+    <progress id="bar" value="0" max="100" style="display:none"></progress>
+    <pre id="log" style="max-height:220px">Waiting…</pre>
+    <div class="note"><b>Board won't connect?</b> Hold <b>BOOT</b>, tap <b>EN/RESET</b>, release BOOT, then click again. Boards with native USB (S2/S3/C3) often need this. Flashing starts at <code class="f">0x00</code>. The page refuses to flash if the connected chip differs from the one you picked. After success, <b>unplug and replug power</b>.</div>
+  </section>
+
+  <section>
+    <h2><span class="n">4</span>Wiring &amp; setup</h2>
+    <p><b>Default pins for the selected chip</b> (from the firmware's target header):</p>
+    <div id="pintable"></div>
+    <p><b>Betaflight Configurator v10.10</b> (not newer, not INAV). In <b>Options</b>: disable <i>Advanced CLI AutoComplete</i>, enable <i>Show all serial devices</i>, disable <i>Auto-Connect</i>. Connect, then paste this into the <b>CLI</b> tab:</p>
+    <pre id="script"></pre>
+    <div class="row"><button class="secondary" id="copy">Copy script</button></div>
+    <div id="steps"></div>
+  </section>
+
+  <section>
+    <h2><span class="n">5</span>ESC flashing / rewriting</h2>
+    <div class="note warn"><b>Experimental in esp-fc.</b> The author added a BLHeli 4-way passthrough in v0.2.0-RC4 and labels it experimental. This page can't write ESC firmware directly, because the flight controller has to bridge the serial lines. Use a browser ESC tool through the FC.</div>
+    <ol>
+      <li><b>Remove all propellers.</b> Power the quad from a battery (ESCs need it) and keep USB connected.</li>
+      <li>Wire each ESC signal to the motor pins from the table above. Don't arm.</li>
+      <li>Close Betaflight Configurator completely, since only one app can hold the serial port.</li>
+      <li>Open <a href="https://esc-configurator.com" target="_blank" rel="noopener">esc-configurator.com</a> in Chrome, connect to the board's port, and read the ESCs.</li>
+      <li>Change motor direction, or flash BLHeli_S / Bluejay / AM32 as the tool offers for your ESC model.</li>
+    </ol>
+    <div class="note bad"><b>Before any ESC firmware write:</b> confirm the exact ESC model and MCU family in the tool, and use firmware built for that model. A wrong image can leave an ESC dead. If the tool can't see the ESCs, esp-fc's passthrough isn't working for your setup, so flash them with a different FC or a dedicated USB link.</div>
+    <p>To spin a motor the other way, swapping two of its three wires also works, and esp-fc's setup guide recommends it.</p>
+  </section>
+
+  <footer class="credits">
+    <p><b>Credits.</b> The firmware is <a href="https://github.com/rtlopez/esp-fc" target="_blank" rel="noopener">esp-fc</a> by
+      <a href="https://github.com/rtlopez" target="_blank" rel="noopener">rtlopez</a> and contributors, © 2016 rtlopez, MIT License
+      (<a href="firmware/ESP-FC-LICENSE.txt">license copy</a>). Flashing runs on
+      <a href="https://github.com/espressif/esptool-js" target="_blank" rel="noopener">esptool-js</a> by Espressif (Apache-2.0).
+      ESC tools: <a href="https://esc-configurator.com" target="_blank" rel="noopener">ESC Configurator</a>.
+      Configuration: <a href="https://github.com/betaflight/betaflight-configurator/releases/tag/10.10.0" target="_blank" rel="noopener">Betaflight Configurator</a>.</p>
+    <p>This is an unofficial flasher, not made by or endorsed by any of the projects above. It is provided as is, without warranty.
+      You are responsible for safe use: test with propellers off, and configure and test failsafe before flying.</p>
+  </footer>
+</main>
+
+<script type="module">
+import { ESPLoader, Transport } from "https://cdn.jsdelivr.net/npm/esptool-js@0.4.7/+esm";
+
+const $ = id => document.getElementById(id);
+const REL = "https://github.com/rtlopez/esp-fc/releases";
+
+// ---------------------------------------------------------------------------
+// Chip data. Pin numbers are the defaults in esp-fc lib/Espfc/src/Target/Target*.h
+// (-1 = no default). "rxUart" is the UART index whose default function is a serial receiver.
+// ---------------------------------------------------------------------------
+const CHIPS = {
+  esp32:   { name:"ESP32",    merged:true,  tier:"recommended",
+    out:[27,25,4,12], ppm:35,
+    uart:[{tx:1,rx:3,fn:"MSP (USB-UART)"},{tx:33,rx:32,fn:"MSP"},{tx:17,rx:16,fn:"Serial RX (default receiver)"}], rxUart:2,
+    spi:{sck:18,mosi:23,miso:19,cs:5,csBaro:13}, i2c:{scl:22,sda:21}, buzzer:26, led:2, vbat:36, ibat:39, gpsUart:1 },
+  esp32s3: { name:"ESP32-S3", merged:true,  tier:"recommended",
+    out:[39,40,41,42], ppm:6,
+    uart:[{tx:43,rx:44,fn:"MSP"},{tx:16,rx:15,fn:"MSP"},{tx:18,rx:17,fn:"Serial RX (default receiver)"}], rxUart:2,
+    spi:{sck:12,mosi:11,miso:13,cs:8,csBaro:7}, i2c:{scl:10,sda:9}, buzzer:5, led:-1, vbat:1, ibat:4, gpsUart:1 },
+  esp32s2: { name:"ESP32-S2", merged:true,  tier:"experimental",
+    out:[39,40,41,42], ppm:6,
+    uart:[{tx:43,rx:44,fn:"MSP"},{tx:17,rx:16,fn:"Serial RX (default receiver)"}], rxUart:1,
+    spi:{sck:12,mosi:11,miso:13,cs:10,csBaro:7}, i2c:{scl:9,sda:8}, buzzer:5, led:15, vbat:1, ibat:4, gpsUart:null },
+  esp32c3: { name:"ESP32-C3", merged:true,  tier:"experimental",
+    out:[2,3,4,5], ppm:-1,
+    uart:[{tx:21,rx:20,fn:"MSP"},{tx:-1,rx:-1,fn:"MSP (unassigned)"}], rxUart:null,
+    spi:{sck:-1,mosi:-1,miso:-1,cs:-1,csBaro:-1}, i2c:{scl:6,sda:8}, buzzer:-1, led:-1, vbat:0, ibat:1, gpsUart:null },
+  esp8266: { name:"ESP8266",  merged:false, tier:"obsolete", pinsUnknown:true }
+};
+
+const BOARDS = [
+  { id:"esp32-devkit", label:"ESP32 DevKit (WROOM-32 / DevKitC / DOIT V1 / NodeMCU-32S)", chip:"esp32",
+    notes:["Motor 4 defaults to GPIO 12, a boot-strapping pin. esp-fc's default layout is documented as working, but don't add a pull-up to that pin."] },
+  { id:"lolin32", label:"Wemos / Lolin32 (the board esp-fc builds its ESP32 target for)", chip:"esp32", notes:[] },
+  { id:"esp32s3-devkitc", label:"ESP32-S3 DevKitC-1 / generic S3 board", chip:"esp32s3",
+    notes:["The S3 build uses native USB (CDC on boot). Plug into the port labelled USB for Betaflight Configurator.",
+           "On N8R8 / N16R8 modules (octal PSRAM) GPIO 35–37 are reserved. The default pins don't use them."] },
+  { id:"lolin-s3-mini", label:"Lolin S3 Mini (the board esp-fc builds its S3 target for)", chip:"esp32s3", notes:[] },
+  { id:"esp32s2", label:"ESP32-S2 (Saola-1 / S2 Mini)", chip:"esp32s2",
+    notes:["Marked experimental by the author. Native USB, so you will probably need the BOOT+RESET trick to flash."] },
+  { id:"esp32c3", label:"ESP32-C3 (DevKitM-1 / SuperMini / XIAO C3)", chip:"esp32c3",
+    notes:["Marked experimental: single core, no FPU, so loop rates are limited (firmware caps I2C gyro at 1 kHz, SPI at 2 kHz).",
+           "No default SPI pins or PPM pin, so use an I2C gyro or assign SPI pins yourself. GPIO 2, 8, 9 are strapping pins; 12–17 are flash; 18–19 are USB."] },
+  { id:"esp8266", label:"ESP8266 (D1 mini / NodeMCU) — obsolete", chip:"esp8266",
+    notes:["The author marks ESP8266 as obsolete and no longer developed. Pin remapping is very limited; run <code>get pin</code> after flashing."] },
+  { id:"other", label:"Other / custom ESP board…", chip:null, notes:[] }
+];
+
+const PROTO = {
+  PWM:        {analog:true,  tip:"Standard PWM uses 1000–2000 µs pulses at a low rate (50–480 Hz). The script sets asynchronous mode at 50 Hz, which every ESC accepts; raise <code>output_motor_rate</code> (max 480) only if your ESC supports it."},
+  ONESHOT125: {analog:true,  tip:"OneShot125 needs an ESC that supports it. Calibrate the ESCs (Motors tab) before first flight."},
+  ONESHOT42:  {analog:true,  tip:"OneShot42 needs an ESC that supports it. Calibrate the ESCs (Motors tab) before first flight."},
+  MULTISHOT:  {analog:true,  tip:"Multishot needs an ESC that supports it. Calibrate the ESCs (Motors tab) before first flight."},
+  BRUSHED:    {analog:true,  tip:"For brushed motors through FET/MOSFET drivers. The firmware forces asynchronous output for this mode. Calibration does not apply."},
+  DSHOT150:   {analog:false, tip:"Digital: no calibration needed. Best choice for long signal wires."},
+  DSHOT300:   {analog:false, tip:"Digital: no calibration needed. Recommended default for BLHeli_S / Bluejay / AM32 ESCs."},
+  DSHOT600:   {analog:false, tip:"Digital: no calibration needed. Needs short, clean signal wires."},
+  PROSHOT1000:{analog:false, tip:"Digital ProShot. Only use it if your ESC firmware supports it."}
+};
+
+let fileData = null, fileName = "", fileFrom = "", transport = null, loader = null, busy = false, manifest = null;
+
+function log(t){ const l=$("log"); l.textContent += (l.textContent==="Waiting…"?"":"\n")+t; l.scrollTop=l.scrollHeight; }
+const term = { clean(){}, writeLine(d){log(d)}, write(d){} };
+if(!("serial" in navigator)) $("nosupport").style.display="block";
+
+// ---------------------------------------------------------------- selection
+$("board").innerHTML = BOARDS.map(b=>`<option value="${b.id}">${b.label}</option>`).join("");
+$("chip").innerHTML  = Object.entries(CHIPS).map(([k,c])=>`<option value="${k}">${c.name}${c.tier!=="recommended"?" — "+c.tier:""}</option>`).join("");
+
+const board = () => BOARDS.find(b=>b.id===$("board").value);
+const chipId = () => board().chip || $("chip").value;
+
+function version(){ return (manifest && manifest.version) || "vX.Y.Z"; }
+function expectedName(){
+  const c=chipId();
+  return CHIPS[c].merged ? `espfc_${version()}_${c}_0x00.bin` : `espfc_${version()}_${c}.bin`;
+}
+
+function refreshBoard(){
+  const b=board(), c=chipId(), ci=CHIPS[c];
+  $("chipwrap").style.display = b.chip ? "none":"block";
+  let h="";
+  if(ci.tier==="recommended") h+=`<div class="note ok"><b>${ci.name}</b> — recommended, well-supported target.</div>`;
+  else h+=`<div class="note warn"><b>${ci.name}</b> — ${ci.tier} target.</div>`;
+  b.notes.forEach(n=>{ h+=`<div class="note warn">${n}</div>`; });
+  $("boardinfo").innerHTML=h;
+  $("fname").textContent=expectedName();
+  $("rel").href = manifest && manifest.version ? `${REL}/tag/${encodeURIComponent(manifest.version)}` : REL;
+  refreshHosted();
+  refreshPins(); refreshScript();
+}
+
+function pin(v){ return v===null||v===undefined||v<0 ? "—" : v; }
+function refreshPins(){
+  const ci=CHIPS[chipId()];
+  if(ci.pinsUnknown){ $("pintable").innerHTML=`<p class="note">No default pin table for this chip. Run <code>get pin</code> after flashing.</p>`; return; }
+  const rows=[];
+  ci.out.forEach((g,i)=>rows.push(["Motor "+(i+1)+` (<code>pin_output_${i}</code>)`,pin(g)]));
+  rows.push(["Gyro I2C SCL / SDA",`${pin(ci.i2c.scl)} / ${pin(ci.i2c.sda)}`]);
+  rows.push(["Gyro SPI SCK / MOSI / MISO",`${pin(ci.spi.sck)} / ${pin(ci.spi.mosi)} / ${pin(ci.spi.miso)}`]);
+  rows.push(["SPI chip select: gyro / baro",`${pin(ci.spi.cs)} / ${pin(ci.spi.csBaro)}`]);
+  ci.uart.forEach((u,i)=>rows.push([`UART ${i} TX / RX — ${u.fn}`,`${pin(u.tx)} / ${pin(u.rx)}`]));
+  rows.push(["PPM receiver",pin(ci.ppm)]);
+  rows.push(["Battery voltage / current ADC",`${pin(ci.vbat)} / ${pin(ci.ibat)}`]);
+  rows.push(["Buzzer / LED",`${pin(ci.buzzer)} / ${pin(ci.led)}`]);
+  $("pintable").innerHTML="<table><tr><th>Function</th><th>GPIO</th></tr>"+rows.map(r=>`<tr><td>${r[0]}</td><td class="n">${r[1]}</td></tr>`).join("")+"</table>";
+}
+
+function refreshScript(){
+  const c=chipId(), ci=CHIPS[c], gyro=$("gyro").value, proto=$("proto").value, rx=$("rx").value, gps=$("gps").value==="1";
+  const L=[];
+  $("protoinfo").innerHTML = `<div class="note"><b>${proto}:</b> ${PROTO[proto].tip}</div>`;
+
+  if(ci.pinsUnknown){
+    L.push("# ESP8266: pin defaults aren't documented here. Run 'get pin' first,",
+           "# then remap with: set pin_<function> <gpio>",
+           "set output_motor_protocol "+proto);
+  } else {
+    L.push("# ---- motors (Quad X, motor 1..4) ----");
+    ci.out.forEach((g,i)=>L.push(`set pin_output_${i} ${g}`));
+    L.push("set output_motor_protocol "+proto);
+    if(proto==="PWM") L.push("set output_motor_async 1","set output_motor_rate 50");
+    L.push("");
+    L.push(`# ---- gyro on ${gyro.toUpperCase()} ----`);
+    if(gyro==="spi"){
+      if(ci.spi.sck<0){
+        L.push("# This chip has no default SPI pins. Pick free GPIOs, then uncomment:",
+               "# set pin_spi_0_sck <gpio>","# set pin_spi_0_mosi <gpio>","# set pin_spi_0_miso <gpio>","# set pin_spi_cs_0 <gpio>");
+      } else {
+        L.push(`set pin_spi_0_sck ${ci.spi.sck}`,`set pin_spi_0_mosi ${ci.spi.mosi}`,`set pin_spi_0_miso ${ci.spi.miso}`,`set pin_spi_cs_0 ${ci.spi.cs}`);
+      }
+    } else {
+      L.push(`set pin_i2c_scl ${ci.i2c.scl}`,`set pin_i2c_sda ${ci.i2c.sda}`);
+    }
+    L.push("","# ---- receiver ----");
+    if(rx==="PPM"){
+      if(ci.ppm<0) L.push("# No default PPM pin on this chip. Pick a free GPIO, then uncomment:","# set pin_input_rx <gpio>");
+      else L.push(`set pin_input_rx ${ci.ppm}`);
+    } else if(rx.startsWith("ESP-NOW")){
+      L.push("# ESP-NOW needs no pins. In the Receiver tab choose 'SPI Rx (e.g. built-in Rx)'.");
+    } else if(ci.rxUart!==null){
+      const u=ci.uart[ci.rxUart];
+      L.push(`# UART ${ci.rxUart} is already the serial-receiver port: wire receiver TX -> GPIO ${u.rx}, RX -> GPIO ${u.tx}.`);
+    } else {
+      L.push("# No serial-receiver UART by default on this chip. Pick free GPIOs, then uncomment:",
+             "# set pin_serial_1_rx <gpio>","# set pin_serial_1_tx <gpio>","# set serial_1 64 115200 0");
+    }
+    if(gps){
+      L.push("","# ---- GPS ----");
+      if(ci.gpsUart!==null){
+        const u=ci.uart[ci.gpsUart];
+        L.push(`# wire GPS TX -> GPIO ${u.rx}, GPS RX -> GPIO ${u.tx}`,
+               "set feature_gps 1",`set serial_${ci.gpsUart} 2 115200 115200`);
+      } else {
+        L.push("# No spare UART by default on this chip. Assign free pins to a UART (get pin),",
+               "# then: set feature_gps 1 / set serial_<index> 2 115200 115200");
+      }
+    }
+  }
+  L.push("","save","reboot");
+  $("script").textContent=L.join("\n");
+
+  const steps=[];
+  if(rx==="CRSF / ELRS"||rx==="SBUS"||rx==="IBUS")
+    steps.push(`Receiver tab: set mode to <b>Serial</b> and provider to <b>${rx.split(" ")[0]}</b>. In the Ports tab make sure <b>Serial Rx</b> is ticked on the UART your receiver is wired to.`);
+  steps.push("Setup tab: put the quad level and still, then click <b>Calibrate Accelerometer</b>. If the 3D model moves wrongly, fix <i>Board orientation</i> in Configuration.");
+  steps.push("Configuration tab: set PID loop to 1–2 kHz and keep CPU load under about 50%.");
+  steps.push("Modes tab: add <b>Arm</b> (required), plus Angle / Air mode / Buzzer / Failsafe as you like.");
+  if(PROTO[proto].analog && proto!=="BRUSHED")
+    steps.push("Motors tab: <b>props off</b>, then calibrate the ESCs (analog protocols only): tick the safety box, move the master slider to max, connect the battery, wait for the beeps, then drag it to min.");
+  steps.push("Motors tab: <b>props off</b>, use the test sliders to check each motor's position and spin direction. Only Quad-X is supported.");
+  steps.push("If an option snaps back after Save, esp-fc doesn't support it. Don't use Presets.");
+  $("steps").innerHTML="<p><b>Then in the configurator:</b></p><ol>"+steps.map(s=>`<li>${s}</li>`).join("")+"</ol>";
+}
+
+["board","chip","gyro","rx","proto","gps"].forEach(id=>$(id).addEventListener("input",refreshBoard));
+$("copy").onclick=async()=>{ try{await navigator.clipboard.writeText($("script").textContent); $("copy").textContent="Copied"; setTimeout(()=>$("copy").textContent="Copy script",1500);}catch{} };
+
+// ---------------------------------------------------------------- hosted firmware (GitHub Pages)
+async function loadManifest(){
+  try{
+    const r=await fetch("firmware/manifest.json",{cache:"no-cache"});
+    if(r.ok) manifest=await r.json();
+  }catch{}
+  refreshBoard();
+}
+function refreshHosted(){
+  const box=$("hosted"), c=chipId();
+  const f = manifest && manifest.files && manifest.files[c];
+  if(!f){ box.style.display="none"; if(fileFrom==="hosted"){ fileData=null; fileFrom=""; $("go").disabled=true; $("fileinfo").style.display="none"; } return; }
+  box.style.display="block";
+  box.innerHTML=`Hosted firmware found for this chip: <b>${f}</b>${manifest.source?` (${manifest.source})`:""}. <button class="secondary" id="usehosted" style="padding:4px 10px;margin-left:6px">Use it</button>`;
+  $("usehosted").onclick=()=>useHosted(f);
+  if(fileFrom!=="manual" && fileName!==f) useHosted(f);
+}
+async function useHosted(name){
+  try{
+    const r=await fetch("firmware/"+name,{cache:"no-cache"});
+    if(!r.ok) throw new Error("HTTP "+r.status);
+    const buf=new Uint8Array(await r.arrayBuffer());
+    const want=manifest.sha256 && manifest.sha256[name];
+    if(want){
+      const h=Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256",buf))).map(b=>b.toString(16).padStart(2,"0")).join("");
+      if(h!==want) throw new Error("checksum mismatch, refusing to use this file");
+    }
+    setFile(name,buf,"hosted");
+  }catch(e){
+    const box=$("fileinfo"); box.style.display="block"; box.className="note bad"; box.textContent="Couldn't load hosted firmware: "+e.message;
+  }
+}
+
+// ---------------------------------------------------------------- file handling
+const drop=$("drop");
+drop.onclick=()=>$("file").click();
+drop.ondragover=e=>{e.preventDefault();drop.classList.add("over")};
+drop.ondragleave=()=>drop.classList.remove("over");
+drop.ondrop=e=>{e.preventDefault();drop.classList.remove("over");if(e.dataTransfer.files[0])loadFile(e.dataTransfer.files[0])};
+$("file").onchange=e=>{if(e.target.files[0])loadFile(e.target.files[0])};
+async function loadFile(f){ setFile(f.name,new Uint8Array(await f.arrayBuffer()),"manual"); }
+
+function setFile(name,buf,from){
+  fileName=name; fileData=buf; fileFrom=from;
+  const box=$("fileinfo"); box.style.display="block";
+  let msg=`<b>${name}</b> — ${(buf.length/1024).toFixed(0)} KB${from==="hosted"?" (hosted)":""}`, cls="note ok";
+  if(buf[0]!==0xE9){ msg+=`<br>This doesn't start with the ESP image magic byte (0xE9). It may not be a firmware image.`; cls="note bad"; fileData=null; }
+  const m=name.match(/esp(?:32(?:s2|s3|c3)?|8266)/i);
+  if(m && m[0].toLowerCase()!==chipId()){ msg+=`<br>The file name says <b>${m[0]}</b> but your board is <b>${chipId()}</b>. Check step 1.`; if(cls!=="note bad") cls="note warn"; }
+  if(CHIPS[chipId()].merged && !/_0x00\.bin$/i.test(name)){ msg+=`<br>File name doesn't end in <code>_0x00.bin</code>. Only the merged image belongs at 0x00.`; if(cls!=="note bad") cls="note warn"; }
+  box.className=cls; box.innerHTML=msg;
+  $("go").disabled=!fileData;
+}
+
+function toBinaryString(u8){ let s=""; const CH=0x8000; for(let i=0;i<u8.length;i+=CH) s+=String.fromCharCode.apply(null,u8.subarray(i,i+CH)); return s; }
+async function disconnect(){
+  try{ if(transport) await transport.disconnect(); }catch{}
+  transport=null; loader=null; $("stop").disabled=true; $("detected").textContent="no device";
+}
+$("stop").onclick=disconnect;
+
+$("go").onclick=async()=>{
+  if(busy||!fileData) return; busy=true; $("go").disabled=true; $("log").textContent="Waiting…";
+  const bar=$("bar"); bar.style.display="block"; bar.value=0;
+  try{
+    log("Choose the board's serial port in the browser prompt…");
+    const port=await navigator.serial.requestPort({});
+    transport=new Transport(port,false);
+    loader=new ESPLoader({transport,baudrate:parseInt($("baud").value),romBaudrate:115200,terminal:term});
+    $("stop").disabled=false;
+    const chipName=await loader.main();
+    $("detected").textContent=chipName;
+    const want=CHIPS[chipId()].name, family=loader.chip&&loader.chip.CHIP_NAME;
+    if(family!==want) throw new Error(`Detected "${chipName}" (${family}) but you selected ${want}. Not flashing. Fix step 1 or use the right file.`);
+    log(`Chip OK: ${chipName}. Flashing ${fileName} at 0x00…`);
+    await loader.writeFlash({
+      fileArray:[{data:toBinaryString(fileData),address:0x00}],
+      flashSize:"keep",flashMode:"keep",flashFreq:"keep",
+      eraseAll:$("erase").value==="1",compress:true,
+      reportProgress:(i,written,total)=>{bar.value=Math.round(written/total*100);},
+    });
+    bar.value=100;
+    log("Done. Resetting board…");
+    await loader.hardReset();
+    log("\nSUCCESS. Unplug and replug power, then connect with Betaflight Configurator 10.10.");
+  }catch(e){
+    log("\nERROR: "+(e&&e.message?e.message:e));
+    log("Tip: lower the baud rate, try another USB cable or port, or hold BOOT while connecting.");
+  }finally{
+    await disconnect(); busy=false; $("go").disabled=!fileData;
+  }
+};
+
+refreshBoard();
+loadManifest();
+</script>
+</body>
+</html>
