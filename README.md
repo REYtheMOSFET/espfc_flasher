@@ -54,5 +54,5 @@ The flight controller has to bridge the serial lines to the ESCs. esp-fc has an 
 
 - The page flashes the **merged** image (`..._0x00.bin`) at address `0x00`. ESP8266 uses the plain `.bin`, also at `0x00`.
 - It refuses to flash if the connected chip doesn't match the selected board.
-- Not yet tested on real hardware. Try it on a spare board first, and test motors with propellers off.
+- only tested on esp32 dev board :P. Try it on a spare board first, and test motors with propellers off.
 - Provided as is, without warranty.
