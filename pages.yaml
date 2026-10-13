@@ -1,0 +1,130 @@
+name: Build flasher site
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "0 3 * * 1"   # weekly: pick up new esp-fc releases
+  workflow_dispatch:
+    inputs:
+      source:
+        description: "Where the firmware comes from"
+        type: choice
+        options: [release, build]
+        default: release
+      repo:
+        description: "esp-fc repository (owner/name). Use your fork to ship custom pin defaults."
+        default: rtlopez/esp-fc
+      ref:
+        description: "release: tag (empty = latest). build: branch, tag or commit (empty = default branch)."
+        required: false
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    env:
+      SRC_MODE: ${{ inputs.source || 'release' }}
+      SRC_REPO: ${{ inputs.repo || 'rtlopez/esp-fc' }}
+      SRC_REF:  ${{ inputs.ref || '' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch release binaries
+        if: ${{ env.SRC_MODE == 'release' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p site/firmware
+          if [ -n "$SRC_REF" ]; then ARGS=("$SRC_REF"); else ARGS=(); fi
+          gh release download "${ARGS[@]}" --repo "$SRC_REPO" \
+            --pattern 'espfc_*_0x00.bin' --pattern 'espfc_*_esp8266.bin' \
+            --dir site/firmware --clobber
+          echo "SOURCE_LABEL=release ${SRC_REF:-latest} of $SRC_REPO" >> "$GITHUB_ENV"
+
+      - name: Check out esp-fc source
+        if: ${{ env.SRC_MODE == 'build' }}
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.SRC_REPO }}
+          ref: ${{ env.SRC_REF }}
+          path: src
+
+      - uses: actions/setup-python@v5
+        if: ${{ env.SRC_MODE == 'build' }}
+        with:
+          python-version: "3.12"
+
+      - name: Build firmware with PlatformIO
+        if: ${{ env.SRC_MODE == 'build' }}
+        run: |
+          pip install --upgrade platformio
+          mkdir -p site/firmware
+          cd src
+          REV=$(git rev-parse --short HEAD)
+          VER=$(echo "${SRC_REF:-custom}" | tr -c 'A-Za-z0-9._-' '-')-$REV
+          for t in esp32 esp32s2 esp32s3 esp32c3; do
+            PLATFORMIO_BUILD_FLAGS="-DESPFC_REVISION=$REV -DESPFC_VERSION=$VER" pio run -e $t
+            cp ".pio/build/$t/firmware_0x00.bin" "../site/firmware/espfc_${VER}_${t}_0x00.bin"
+          done
+          PLATFORMIO_BUILD_FLAGS="-DESPFC_REVISION=$REV -DESPFC_VERSION=$VER" pio run -e esp8266
+          cp .pio/build/esp8266/firmware.bin "../site/firmware/espfc_${VER}_esp8266.bin"
+          echo "SOURCE_LABEL=built from $SRC_REPO@$REV" >> "$GITHUB_ENV"
+
+      - name: Include the esp-fc license (MIT requires it with every copy)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p site/firmware
+          if [ -f src/LICENSE ]; then
+            cp src/LICENSE site/firmware/ESP-FC-LICENSE.txt
+          else
+            gh api "repos/$SRC_REPO/contents/LICENSE" -H "Accept: application/vnd.github.raw" > site/firmware/ESP-FC-LICENSE.txt
+          fi
+          test -s site/firmware/ESP-FC-LICENSE.txt || { echo "Could not get the esp-fc LICENSE"; exit 1; }
+
+      - name: Write manifest and assemble site
+        run: |
+          python3 - <<'EOF'
+          import hashlib, json, os, re, sys
+          d = "site/firmware"
+          files, sums, version = {}, {}, None
+          pat = re.compile(r"^espfc_(.+)_(esp32s3|esp32s2|esp32c3|esp32|esp8266)(_0x00)?\.bin$")
+          for n in sorted(os.listdir(d)):
+              m = pat.match(n)
+              if not m: continue
+              ver, chip = m.group(1), m.group(2)
+              files[chip] = n
+              sums[n] = hashlib.sha256(open(os.path.join(d, n), "rb").read()).hexdigest()
+              version = version or ver
+          if not files:
+              sys.exit("No firmware files found. Check the release assets or the build step.")
+          json.dump({"version": version, "source": os.environ.get("SOURCE_LABEL", ""),
+                     "files": files, "sha256": sums},
+                    open(os.path.join(d, "manifest.json"), "w"), indent=2)
+          print(json.dumps(files, indent=2))
+          EOF
+          cp index.html site/index.html
+          touch site/.nojekyll
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-24.04
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
